@@ -10,7 +10,6 @@ touch artifacts/preproc/.gitkeep
 touch artifacts/models/.gitkeep
 touch artifacts/blockchain/.gitkeep
 touch artifacts/stream/.gitkeep
-touch artifacts/reports/.gitkeep
 
 # Reports folder
 touch reports/.gitkeep

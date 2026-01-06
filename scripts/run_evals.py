@@ -18,16 +18,21 @@ def get_datasets():
 
 def eval_ae(dataset):
     print(f" [AE] Evaluating Autoencoder for: {dataset}...")
+    # AE remains pointwise
     subprocess.run(
         [sys.executable, "-m", "src.models.eval_ae", "--dataset", dataset],
         check=False
     )
 
 
-def eval_ganomaly(dataset):
-    print(f" [GAN] Evaluating GANomaly for: {dataset}...")
+def eval_ganomaly(dataset, window=5):
+    print(f" [GAN] Evaluating GANomaly for: {dataset} (Window: {window})...")
     subprocess.run(
-        [sys.executable, "-m", "src.models.eval_ganomaly", "--dataset", dataset],
+        [
+            sys.executable, "-m", "src.models.eval_ganomaly",
+            "--dataset", dataset,
+            "--window", str(window)
+        ],
         check=False
     )
 
@@ -40,6 +45,7 @@ def main():
         help="Which model type to evaluate: 'ae', 'ganomaly', or 'both'"
     )
     parser.add_argument("--dataset", default="all", help="Specific dataset name or 'all'")
+    parser.add_argument("--window", type=int, default=5, help="Window size for GANomaly (V1)")
 
     args = parser.parse_args()
 
@@ -57,7 +63,7 @@ def main():
             eval_ae(ds)
 
         if args.mode in ["ganomaly", "both"]:
-            eval_ganomaly(ds)
+            eval_ganomaly(ds, window=args.window)
 
     print("\n All requested evaluations completed!")
 

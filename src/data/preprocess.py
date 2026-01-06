@@ -98,8 +98,13 @@ def preprocess_dataset(
             else:
                 cat_candidates.append(c)
 
-        #  Chronological Split (80/20) ---
-        split_idx = int(len(df) * 0.8)
+        # --- Version 1: Linux-only chronological split fix ---
+        if dataset_name.startswith("linux"):
+            split_ratio = 0.6
+        else:
+            split_ratio = 0.8
+
+        split_idx = int(len(df) * split_ratio)
         train_df = df.iloc[:split_idx].copy()
         test_df = df.iloc[split_idx:].copy()
 

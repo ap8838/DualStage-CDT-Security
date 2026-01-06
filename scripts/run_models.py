@@ -13,27 +13,33 @@ def get_datasets():
     if not datasets:
         print(" No train parquet files found in data/processed/")
         sys.exit(1)
-    return datasets
+    return sorted(datasets)
 
 
 def run_ae(dataset):
     print(f"    Step: Autoencoder (Train & Eval)")
+    # AE is pointwise - no window argument
     subprocess.run([sys.executable, "-m", "src.models.train_ae", "--dataset", dataset], check=True)
     subprocess.run([sys.executable, "-m", "src.models.eval_ae", "--dataset", dataset], check=True)
 
 
-def run_ganomaly(dataset):
-    print(f"    Step: GANomaly (Train & Eval)")
-    # Using your specific tuned lambda values here
+def run_ganomaly(dataset, window=5):
+    print(f"    Step: GANomaly (Train & Eval) | Window: {window}")
+    # Using your specific tuned lambda values and the V1 window parameter
     subprocess.run([
         sys.executable, "-m", "src.models.train_ganomaly",
         "--dataset", dataset,
         "--epochs", "150",
         "--lr", "0.0001",
         "--lambda-adv", "0.05",
-        "--lambda-latent", "15"
+        "--lambda-latent", "15",
+        "--window", str(window)
     ], check=True)
-    subprocess.run([sys.executable, "-m", "src.models.eval_ganomaly", "--dataset", dataset], check=True)
+    subprocess.run([
+        sys.executable, "-m", "src.models.eval_ganomaly",
+        "--dataset", dataset,
+        "--window", str(window)
+    ], check=True)
 
 
 def main():
@@ -44,10 +50,10 @@ def main():
         help="Which model(s) to run: 'ae', 'ganomaly', or 'both'"
     )
     parser.add_argument("--dataset", default="all", help="Specific dataset name or 'all'")
+    parser.add_argument("--window", type=int, default=5, help="Window size for GANomaly (V1)")
 
     args = parser.parse_args()
 
-    # Determine which datasets to process
     all_datasets = get_datasets()
     target_datasets = [args.dataset] if args.dataset != "all" else all_datasets
 
@@ -64,7 +70,7 @@ def main():
             run_ae(ds)
 
         if args.mode in ["ganomaly", "both"]:
-            run_ganomaly(ds)
+            run_ganomaly(ds, window=args.window)
 
     print("\n All requested tasks completed successfully!")
 

@@ -9,6 +9,7 @@ from sklearn.model_selection import train_test_split
 
 from src.models.ganomaly import GANomaly
 from src.utils.seed import set_seed
+from src.utils.temporal import make_sliding_windows # Added V1
 
 
 def train_ganomaly(
@@ -19,6 +20,7 @@ def train_ganomaly(
     seed=42,
     lambda_adv=1.0,
     lambda_latent=1.0,
+    window=5, # Added V1
 ):
     set_seed(seed)
 
@@ -47,13 +49,17 @@ def train_ganomaly(
         .values
     )
 
+    # --- Version 1: Apply Sliding Window ---
+    if window > 1:
+        x, _ = make_sliding_windows(x, window=window)
+
     # split
     x_train, x_val = train_test_split(x, test_size=0.2, random_state=seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     x_train = torch.tensor(x_train, dtype=torch.float32).to(device)
     x_val = torch.tensor(x_val, dtype=torch.float32).to(device)
 
-    # model
+    # model - input_dim is now (original_features * window)
     model = GANomaly(input_dim=x_train.shape[1]).to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
@@ -63,40 +69,33 @@ def train_ganomaly(
         optimizer.zero_grad()
         recon, z, z_hat, d_real, d_fake = model(x_train)
 
-        # --- Loss Calculation with Robust Fallback (from second code) ---
         # --- Loss Calculation with Robust Fallback ---
-        used_lambdas = True  # We consider them "used" because we apply them manually
+        used_lambdas = True
         try:
-            # Get the raw component losses
             _, recon_loss, latent_loss, adv_loss = GANomaly.loss_function(
                 x_train, recon, z, z_hat, d_real, d_fake,
             )
         except TypeError:
-            # Fallback if the signature is different
             _, recon_loss, latent_loss, adv_loss = GANomaly.loss_function(
                 x_train, recon, z, z_hat, d_real, d_fake
             )
 
-        # ALWAYS apply weights manually here to ensure consistency
         total_loss = recon_loss + (lambda_latent * latent_loss) + (lambda_adv * adv_loss)
         total_loss.backward()
         optimizer.step()
 
-        # --- Stability Checks (from first code) ---
+        # --- Stability Checks ---
         if not torch.isfinite(total_loss.detach()):
             print(" Non-finite loss detected — stopping early")
             break
         if total_loss.item() > 1e6:
             print(" Loss exploded >1e6 — stopping early")
             break
-        # ------------------------------------------
 
         # val
         model.eval()
         with torch.no_grad():
             recon_v, z_v, z_hat_v, d_real_v, d_fake_v = model(x_val)
-
-            # Use same robust method for validation loss
             try:
                 _, val_recon, val_latent, val_adv = GANomaly.loss_function(
                     x_val, recon_v, z_v, z_hat_v, d_real_v, d_fake_v,
@@ -106,48 +105,39 @@ def train_ganomaly(
                     x_val, recon_v, z_v, z_hat_v, d_real_v, d_fake_v
                 )
 
-            # Apply weights manually for validation total loss
             val_loss = val_recon + (lambda_latent * val_latent) + (lambda_adv * val_adv)
 
         print(
             f"[{dataset}] Epoch {epoch + 1}/{epochs}, "
             f"Train Loss={total_loss.item():.6f}, Val Loss={val_loss.item():.6f}"
-            + (
-                f"  (using lambdas adv={lambda_adv}, latent={lambda_latent})"
-                if used_lambdas
-                else ""
-            )
+            + (f" (lambdas: adv={lambda_adv}, latent={lambda_latent})" if used_lambdas else "")
         )
 
-        train_log.append(
-            {
-                "epoch": epoch + 1,
-                "train_total": float(total_loss.item()),
-                "val_total": float(val_loss.item()),
-                "train_recon": float(recon_loss.item()),
-                "train_latent": float(latent_loss.item()),
-                "train_adv": float(adv_loss.item()),
-                "used_lambdas": used_lambdas,
-                "lambda_adv": lambda_adv,
-                "lambda_latent": lambda_latent,
-            }
-        )
+        train_log.append({
+            "epoch": epoch + 1,
+            "train_total": float(total_loss.item()),
+            "val_total": float(val_loss.item()),
+            "train_recon": float(recon_loss.item()),
+            "train_latent": float(latent_loss.item()),
+            "train_adv": float(adv_loss.item()),
+            "used_lambdas": used_lambdas,
+            "lambda_adv": lambda_adv,
+            "lambda_latent": lambda_latent,
+        })
 
     # save model
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
     torch.save(model.state_dict(), model_path)
 
-    # compute val errors for threshold (recon + latent as score)
+    # compute val errors for threshold
     with torch.no_grad():
         recon, z, z_hat, _, _ = model(x_val)
         recon_err = torch.mean((x_val - recon) ** 2, dim=1)
         latent_err = torch.mean((z - z_hat) ** 2, dim=1)
         errors = (recon_err + latent_err).cpu().numpy()
 
-    # Calculate 99th percentile for threshold
     threshold = float(pd.Series(errors).quantile(0.99))
 
-    # save threshold + logs
     with open(threshold_path, "w") as f:
         json.dump({"threshold": threshold}, f, indent=2)
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
@@ -164,20 +154,9 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--features_file", type=str, default=None)
     parser.add_argument("--seed", type=int, default=42)
-
-    # new tunable loss weights
-    parser.add_argument(
-        "--lambda-adv",
-        type=float,
-        default=1.0,
-        help="Weight for adversarial loss term (GAN part)",
-    )
-    parser.add_argument(
-        "--lambda-latent",
-        type=float,
-        default=1.0,
-        help="Weight for latent consistency loss term",
-    )
+    parser.add_argument("--window", type=int, default=5) # Added V1
+    parser.add_argument("--lambda-adv", type=float, default=1.0)
+    parser.add_argument("--lambda-latent", type=float, default=1.0)
 
     args = parser.parse_args()
 
@@ -189,4 +168,5 @@ if __name__ == "__main__":
         seed=args.seed,
         lambda_adv=args.lambda_adv,
         lambda_latent=args.lambda_latent,
+        window=args.window # Added V1
     )

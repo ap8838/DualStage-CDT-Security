@@ -6,9 +6,9 @@ import pandas as pd
 import torch
 from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_score
 from src.models.ganomaly import GANomaly
+from src.utils.temporal import make_sliding_windows # Added V1
 
-
-def evaluate_ganomaly(dataset, features_file=None):
+def evaluate_ganomaly(dataset, features_file=None, window=5): # Added window param
     test_file = f"data/processed/{dataset}_test.parquet"
     if not os.path.exists(test_file):
         print(f" Skipping {dataset}: no test parquet.")
@@ -26,7 +26,7 @@ def evaluate_ganomaly(dataset, features_file=None):
     cols = [c for c in features["all"] if c not in ("asset_id", "timestamp", "label")]
 
     df = pd.read_parquet(test_file)
-    y_true = df["label"].astype(int).values
+    y = df["label"].astype(int).values
     x = (
         df[cols]
         .apply(pd.to_numeric, errors="coerce")
@@ -35,7 +35,14 @@ def evaluate_ganomaly(dataset, features_file=None):
         .values
     )
 
+    # --- Version 1: Apply Sliding Window ---
+    if window > 1:
+        x, y_true = make_sliding_windows(x, y, window=window)
+    else:
+        y_true = y
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    # input_dim now automatically matches (features * window)
     model = GANomaly(input_dim=x.shape[1]).to(device)
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
@@ -44,14 +51,15 @@ def evaluate_ganomaly(dataset, features_file=None):
         threshold = json.load(f)["threshold"]
 
     with torch.no_grad():
-        recon, z, z_hat, _, _ = model(torch.tensor(x, dtype=torch.float32).to(device))
-        recon_err = torch.mean((torch.tensor(x).to(device) - recon) ** 2, dim=1)
+        x_tensor = torch.tensor(x, dtype=torch.float32).to(device)
+        recon, z, z_hat, _, _ = model(x_tensor)
+        recon_err = torch.mean((x_tensor - recon) ** 2, dim=1)
         latent_err = torch.mean((z - z_hat) ** 2, dim=1)
         scores = (recon_err + latent_err).cpu().numpy()
 
     y_pred = (scores > threshold).astype(int)
 
-    # Check for single-class data (only normal samples in test set)
+    # Check for single-class data
     num_classes = len(set(y_true))
 
     metrics = {
@@ -68,7 +76,6 @@ def evaluate_ganomaly(dataset, features_file=None):
     with open(report_path, "w") as f:
         json.dump(metrics, f, indent=2)
 
-    # Added logging to explain None/NaN results for the research paper context
     if num_classes <= 1:
         print(f" [!] {dataset}: No anomalies in test set. Metrics reflect False Positive behavior only.")
 
@@ -79,14 +86,15 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--dataset", default="all")
     p.add_argument("--features_file", default=None)
+    p.add_argument("--window", type=int, default=5) # Added V1
     args = p.parse_args()
 
     if args.dataset == "all":
         for f in glob.glob("data/processed/*_test.parquet"):
             dataset = os.path.basename(f).replace("_test.parquet", "")
-            evaluate_ganomaly(dataset, features_file=args.features_file)
+            evaluate_ganomaly(dataset, features_file=args.features_file, window=args.window)
     else:
-        evaluate_ganomaly(args.dataset, features_file=args.features_file)
+        evaluate_ganomaly(args.dataset, features_file=args.features_file, window=args.window)
 
 
 if __name__ == "__main__":
