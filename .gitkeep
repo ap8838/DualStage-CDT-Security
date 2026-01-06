@@ -1,0 +1,16 @@
+# Data folders
+touch data/.gitkeep
+touch data/processed/.gitkeep
+touch data/raw/.gitkeep
+
+# Artifacts folders
+touch artifacts/.gitkeep
+touch artifacts/adversarial/.gitkeep
+touch artifacts/preproc/.gitkeep
+touch artifacts/models/.gitkeep
+touch artifacts/blockchain/.gitkeep
+touch artifacts/stream/.gitkeep
+touch artifacts/reports/.gitkeep
+
+# Reports folder
+touch reports/.gitkeep

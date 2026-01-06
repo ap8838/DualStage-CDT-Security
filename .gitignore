@@ -1,0 +1,34 @@
+# Virtualenv
+.venv/
+env/
+venv/
+__pycache__/
+*.pyc
+
+# 1. Ignore EVERYTHING in these folders
+/data/**/*
+/artifacts/**/*
+/reports/**/*
+
+# 2. But allow the .gitkeep files to bypass the ignore
+!**/
+!**/.gitkeep
+
+# 3. Restrict broad rules to only ignore specific data formats
+*.parquet
+*.csv
+*.pt
+*.pkl
+*.sqlite3
+.env
+
+# 4. IMPORTANT: Only ignore JSON inside artifacts/data, NOT project root
+/artifacts/**/*.json
+/data/**/*.json
+
+# OS files & IDEs
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+node_modules/
